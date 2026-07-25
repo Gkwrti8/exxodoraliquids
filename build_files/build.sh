@@ -1,13 +1,29 @@
 #!/bin/bash
 
-set -euxo pipefail
+set -euo pipefail
+set -x
+trap 'rc=$?; echo "ERROR: command '\''$BASH_COMMAND'\'' exited with status $rc on line ${LINENO}"; exit $rc' ERR
 
 # Copy the contents of system_files/ of the git repo to /
-cp -avf "/ctx/system_files"/. /
+if [ -d "/ctx/system_files" ]; then
+  cp -avf "/ctx/system_files"/. /
+else
+  echo "WARNING: /ctx/system_files does not exist; skipping copy"
+fi
 
 echo "==> Installing Build Dependencies"
-# Full dependency list per the kwin-effects-glass README (Fedora 41/42, Wayland build)
-dnf5 install -y \
+
+# Pick package manager (dnf5 if present, otherwise dnf)
+if command -v dnf5 >/dev/null 2>&1; then
+  PKG=dnf5
+elif command -v dnf >/dev/null 2>&1; then
+  PKG=dnf
+else
+  echo "ERROR: neither dnf5 nor dnf found on PATH; install dnf or run dependency installation manually" >&2
+  exit 1
+fi
+
+$PKG install -y \
     git cmake gcc-c++ extra-cmake-modules \
     kwin-devel plasma-workspace-devel libplasma-devel \
     qt6-qtbase-devel qt6-qtbase-private-devel \
@@ -18,10 +34,12 @@ dnf5 install -y \
     libepoxy-devel wayland-devel libdrm-devel
 
 echo "==> Compiling Liquid Glass directly from source"
-git clone https://github.com/4v3ngR/kwin-effects-glass.git /tmp/kwin-effects-glass
-cd /tmp/kwin-effects-glass
+TMP_DIR=/tmp/kwin-effects-glass
+rm -rf "$TMP_DIR"
+git clone https://github.com/4v3ngR/kwin-effects-glass.git "$TMP_DIR"
+cd "$TMP_DIR"
 
 # Configure, build, and install into the system directories
 cmake -B build -S . -DCMAKE_INSTALL_PREFIX=/usr
-cmake --build build
+cmake --build build -- -j"$(nproc)"
 cmake --install build
